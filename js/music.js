@@ -1185,7 +1185,7 @@ if (listenCountBtn) {
 listenInterval = setInterval(() => {
     fetchListenData();
     fetchSongsFromSheet();
-}, 30000);
+}, 5000);
 
 window.addEventListener('beforeunload', () => {
     if (listenInterval) clearInterval(listenInterval);
