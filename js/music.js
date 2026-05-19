@@ -135,7 +135,7 @@ async function incrementListenCount(songId, songName, source = 'normal') {
             localStorage.setItem('xuanken_listens', JSON.stringify(listenData));
             
             showNotification('+1 LISTEN:', `<i class="fa-regular fa-star"></i> ${songId} <i class="fa-regular fa-star"></i>`, '#4ade80', 'fa-headphones');
-            console.log(`GHI NHẬN: ${songName} (${songId}) - ${result.count} (${source})`);
+            console.log(`WEB2: GHI NHẬN: ${songName} (${songId}) - ${result.count} (${source})`);
         }
     } catch (error) {
         console.error('LỖI TĂNG LƯỢT NGHE:', error);
@@ -799,7 +799,7 @@ audio.ontimeupdate = () => {
         if (songs[index] && songs[index].id) {
             hasRecordedCurrentSong = true;
             incrementListenCount(songs[index].id, songs[index].name, currentSource);
-            console.log(`GHI NHẬN SAU 5 GIÂY: ${songs[index].name} (${songs[index].id}) - NGUỒN: ${currentSource}`);
+            console.log(`WEB2: GHI NHẬN SAU 5 GIÂY: ${songs[index].name} (${songs[index].id}) - NGUỒN: ${currentSource}`);
         }
     }
     
@@ -1185,7 +1185,7 @@ if (listenCountBtn) {
 listenInterval = setInterval(() => {
     fetchListenData();
     fetchSongsFromSheet();
-}, 5000);
+}, 30000);
 
 window.addEventListener('beforeunload', () => {
     if (listenInterval) clearInterval(listenInterval);
