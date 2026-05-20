@@ -37,6 +37,87 @@ let isSyncing = false;
 
 let notificationTimeout = null;
 
+let autoSyncInterval = null;
+let lastSongIdsHash = null;
+
+function getSongIdsHash() {
+    if (!songs || !songs.length) return null;
+    return JSON.stringify(songs.map(s => s.id).sort());
+}
+
+async function checkForNewSongs() {
+    if (isSyncing) return;
+    
+    try {
+        const response = await fetch(`${GOOGLE_SHEET_API}?action=get&web=web2&t=${Date.now()}`);
+        if (!response.ok) throw new Error('Network response was not ok');
+        
+        const data = await response.json();
+        const newSongsArray = Object.values(data).filter(song => song.id && song.id.trim() !== '');
+        
+        if (newSongsArray.length === 0) return;
+        
+        const newHash = JSON.stringify(newSongsArray.map(s => s.id).sort());
+        
+        if (lastSongIdsHash !== null && lastSongIdsHash !== newHash) {
+            console.log("PHÁT HIỆN THAY ĐỔI TRONG GOOGLE SHEET, ĐANG CẬP NHẬT PLAYLIST...");
+            
+            const oldSongIds = new Set(songs.map(s => s.id));
+            const newSongIds = new Set(newSongsArray.map(s => s.id));
+            
+            const addedSongs = newSongsArray.filter(s => !oldSongIds.has(s.id));
+            
+            const currentSongId = songs[index]?.id;
+            const wasPlaying = !audio.paused;
+            const currentTime = audio.currentTime;
+            
+            songs = newSongsArray;
+            lastSongIdsHash = newHash;
+            
+            await fetchListenData();
+            
+            const newIndex = songs.findIndex(s => s.id === currentSongId);
+            if (newIndex !== -1) {
+                index = newIndex;
+            }
+            
+            renderPlaylist();
+            updateListenStatsModal();
+            
+            if (addedSongs.length > 0) {
+                addedSongs.forEach(song => {
+                    showNotification('BÀI HÁT MỚI:', song.id, '#4ade80', 'fa-plus-circle');
+                });
+                showNotification('CẬP NHẬT:', `ĐÃ THÊM ${addedSongs.length} BÀI HÁT MỚI`, '#4ade80', 'fa-music');
+            }
+            
+            if (wasPlaying && currentSongId && newIndex !== -1 && !audio.paused) {
+                audio.currentTime = currentTime;
+            }
+            
+            if (newIndex === -1 && songs.length > 0) {
+                changeSong(0, 'auto');
+            }
+        }
+        
+    } catch (error) {
+        console.error("LỖI KIỂM TRA BÀI MỚI:", error);
+    }
+}
+
+function startAutoSync(intervalSeconds = 15) {
+    if (autoSyncInterval) clearInterval(autoSyncInterval);
+    autoSyncInterval = setInterval(checkForNewSongs, intervalSeconds * 1000);
+    console.log(`ĐÃ BẬT KIỂM TRA BÀI MỚI ${intervalSeconds} GIÂY`);
+}
+
+function stopAutoSync() {
+    if (autoSyncInterval) {
+        clearInterval(autoSyncInterval);
+        autoSyncInterval = null;
+    }
+}
+
 if (!Array.prototype.findLast) {
     Array.prototype.findLast = function(predicate) {
         for (let i = this.length - 1; i >= 0; i--) {
@@ -61,6 +142,7 @@ async function fetchSongsFromSheet() {
         }
         
         songs = songsArray;
+        lastSongIdsHash = getSongIdsHash();
         console.log(`ĐÃ TẢI ${songs.length} BÀI HÁT TỪ GOOGLE SHEET`);
         return true;
         
@@ -87,7 +169,7 @@ async function fetchListenData() {
             return listenData;
         }
     } catch (error) {
-        console.log('API error, lấy từ localStorage...');
+        console.log('API ERROR, LẤY TỪ LOCALSTORAGE...');
         const saved = localStorage.getItem('xuanken_listens');
         if (saved) { listenData = JSON.parse(saved); updateListenStatsModal(); }
     }
@@ -1187,8 +1269,11 @@ listenInterval = setInterval(() => {
     fetchSongsFromSheet();
 }, 30000);
 
+startAutoSync(30);
+
 window.addEventListener('beforeunload', () => {
     if (listenInterval) clearInterval(listenInterval);
+    if (autoSyncInterval) clearInterval(autoSyncInterval);
 });
 
 window.adjustLyricFontSize = adjustLyricFontSize;
