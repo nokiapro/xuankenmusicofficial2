@@ -40,9 +40,90 @@ let notificationTimeout = null;
 let autoSyncInterval = null;
 let lastSongIdsHash = null;
 
+let autoUpdateInterval = null;
+let isUpdatingSongs = false;
+
 function getSongIdsHash() {
     if (!songs || !songs.length) return null;
     return JSON.stringify(songs.map(s => s.id).sort());
+}
+
+async function silentCheckAndUpdate() {
+    if (isUpdatingSongs || isSyncing) return;
+    isUpdatingSongs = true;
+    
+    try {
+        const response = await fetch(`${GOOGLE_SHEET_API}?action=get&web=web2&t=${Date.now()}`);
+        if (!response.ok) throw new Error('Network response was not ok');
+        
+        const data = await response.json();
+        const newSongsArray = Object.values(data).filter(song => song.id && song.id.trim() !== '');
+        
+        if (newSongsArray.length === 0) return;
+        
+        const newHash = JSON.stringify(newSongsArray.map(s => s.id).sort());
+        
+        if (lastSongIdsHash !== null && lastSongIdsHash !== newHash) {
+            console.log("PHÁT HIỆN THAY ĐỔI, ĐANG CẬP NHẬT NGẦM...");
+            
+            const currentSongId = songs[index]?.id;
+            const wasPlaying = !audio.paused;
+            const currentTime = audio.currentTime;
+            const currentVolume = audio.volume;
+            
+            songs = newSongsArray;
+            lastSongIdsHash = newHash;
+            
+            await fetchListenDataSilent();
+            
+            const newIndex = songs.findIndex(s => s.id === currentSongId);
+            if (newIndex !== -1) {
+                index = newIndex;
+            }
+            
+            renderPlaylist();
+            updateListenStatsModal();
+            
+            if (isShuffle && songs.length > 0) {
+                refreshShuffleCycle();
+            }
+            
+            if (wasPlaying && currentSongId && newIndex !== -1 && audio.paused) {
+                audio.play().catch(e => console.log("Auto play error:", e));
+            }
+            
+            console.log(`ĐÃ CẬP NHẬT NGẦM: ${songs.length} BÀI HÁT`);
+        }
+        
+    } catch (error) {
+        console.error("LỖI KIỂM TRA NGẦM:", error);
+    } finally {
+        isUpdatingSongs = false;
+    }
+}
+
+async function fetchListenDataSilent() {
+    if (isUpdatingListen) return listenData;
+    try {
+        const response = await fetch(`${GOOGLE_SHEET_API}?action=get&web=web1&t=${Date.now()}`);
+        if (response.ok) {
+            const data = await response.json();
+            listenData = {};
+            Object.values(data).forEach(song => {
+                if (song.id) {
+                    listenData[song.id] = song.listen || 0;
+                }
+            });
+            updateListenStatsModal();
+            localStorage.setItem('xuanken_listens', JSON.stringify(listenData));
+            return listenData;
+        }
+    } catch (error) {
+        console.log('API ERROR, LẤY TỪ LOCALSTORAGE...');
+        const saved = localStorage.getItem('xuanken_listens');
+        if (saved) { listenData = JSON.parse(saved); updateListenStatsModal(); }
+    }
+    return listenData;
 }
 
 async function checkForNewSongs() {
@@ -86,7 +167,7 @@ async function checkForNewSongs() {
             
             if (addedSongs.length > 0) {
                 addedSongs.forEach(song => {
-                    showNotification('BÀI HÁT MỚI:', song.id, '#4ade80', 'fa-plus-circle');
+                    showNotification('BÀI HÁT MỚI:', `<i class="fa-regular fa-star"></i> ${song.id} <i class="fa-regular fa-star"></i>`, '#4ade80', 'fa-plus-circle');
                 });
                 showNotification('CẬP NHẬT:', `ĐÃ THÊM ${addedSongs.length} BÀI HÁT MỚI`, '#4ade80', 'fa-music');
             }
@@ -115,6 +196,24 @@ function stopAutoSync() {
     if (autoSyncInterval) {
         clearInterval(autoSyncInterval);
         autoSyncInterval = null;
+    }
+}
+
+function startAutoUpdate() {
+    if (autoUpdateInterval) clearInterval(autoUpdateInterval);
+    
+    autoUpdateInterval = setInterval(() => {
+        silentCheckAndUpdate();
+    }, 60000);
+    
+    console.log("ĐÃ BẬT CẬP NHẬT MỖI 60 GIÂY (KHÔNG THÔNG BÁO)");
+}
+
+function stopAutoUpdate() {
+    if (autoUpdateInterval) {
+        clearInterval(autoUpdateInterval);
+        autoUpdateInterval = null;
+        console.log("ĐÃ TẮT CẬP NHẬT NGẦM");
     }
 }
 
@@ -1010,6 +1109,8 @@ async function initApp() {
     if (lyrics.length === 0) adjustLyricFontSize("BÀI HÁT TẠM CHƯA CÓ LYRIC NHA HIHI");
     
     console.log(`ĐÃ TẢI ${songs.length} BÀI HÁT TỪ GOOGLE SHEET`);
+    
+    startAutoUpdate();
 }
 
 if (hint) {
@@ -1274,6 +1375,7 @@ startAutoSync(30);
 window.addEventListener('beforeunload', () => {
     if (listenInterval) clearInterval(listenInterval);
     if (autoSyncInterval) clearInterval(autoSyncInterval);
+    if (autoUpdateInterval) clearInterval(autoUpdateInterval);
 });
 
 window.adjustLyricFontSize = adjustLyricFontSize;
